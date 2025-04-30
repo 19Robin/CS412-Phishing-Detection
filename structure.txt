@@ -1,0 +1,24 @@
+CS412-Phishing-Detection/
+│
+├── data/                    # For datasets
+│   └── phishing_email_dataset.csv  # Your dataset
+│
+├── models/                  # For trained models
+│
+├── src/
+│   ├── preprocessing.py     # Data cleaning and feature extraction
+│   ├── smote.py            # SMOTE implementation
+│   ├── image_smotified_gan/ # Clone of the image-SMOTified-GAN repo
+│   ├── mcmc_gan/           # Clone of the MCMC-GAN repo
+│   ├── dcgan.py            # DCGAN implementation
+│   ├── classifiers.py      # Random Forest, BERT etc.
+│   └── utils.py            # Helper functions
+│
+├── notebooks/
+│   ├── EDA.ipynb           # Exploratory data analysis
+│   ├── SMOTE_Experiments.ipynb
+│   └── GAN_Experiments.ipynb
+│
+├── requirements.txt        # Python dependencies
+├── README.md               # Project documentation
+└── .gitignore
