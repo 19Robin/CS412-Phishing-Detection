@@ -3,10 +3,10 @@
 This repository contains code for detecting phishing emails using various techniques to handle class imbalance, including SMOTE, image-SMOTified-GAN, MCMC-GAN, and other GAN variations.
 
 ## Group Members
--- Ranjan Naidu - S11201181 
--- Salote Katia - S11196202 
--- Samuela Robin - S11199961
--- Bulou Vitukawalu - S11210019 
+1. Ranjan Naidu - S11201181 
+2. Salote Katia - S11196202 
+3. Samuela Robin - S11199961
+4. Bulou Vitukawalu - S11210019 
 
 ## Project Overview
 The goal is to detect phishing emails in imbalanced datasets using:
