@@ -1,24 +1,52 @@
 CS412-Phishing-Detection/
 │
-├── data/                    # For datasets
-│   └── phishing_email_dataset.csv  # Your dataset
+├── data/                          # Datasets
+│   └── phishing_email_dataset.csv # Kaggle Phishing Email Dataset
 │
-├── models/                  # For trained models
+├── models/                        # Trained models and weights
+│   ├── smotified_gan/             # SMOTified-GAN weights
+│   ├── mcmc_gan/                  # MCMC-GAN weights
+│   ├── cgan/                      # CGAN weights
+│   ├── vae_gan/                   # VAE-GAN weights
+│   ├── random_forest/             # Random Forest models
+│   ├── xgboost/                   # XGBoost models
+│   └── lstm/                      # LSTM models
 │
 ├── src/
-│   ├── preprocessing.py     # Data cleaning and feature extraction
-│   ├── smote.py            # SMOTE implementation
-│   ├── image_smotified_gan/ # Clone of the image-SMOTified-GAN repo
-│   ├── mcmc_gan/           # Clone of the MCMC-GAN repo
-│   ├── dcgan.py            # DCGAN implementation
-│   ├── classifiers.py      # Random Forest, BERT etc.
-│   └── utils.py            # Helper functions
+│   ├── preprocessing.py           # Data cleaning, tokenization, feature extraction (NLTK, SpaCy)
+│   ├── smote.py                   # SMOTE implementation
+│   ├── smotified_gan.py           # SMOTified-GAN with Wasserstein GAN
+│   ├── mcmc_gan.py                # MCMC-GAN implementation
+│   ├── cgan.py                    # Conditional GAN implementation
+│   ├── vae_gan.py                 # VAE-GAN with BERT embeddings
+│   ├── classifiers.py             # Random Forest, XGBoost, LSTM classifiers
+│   ├── evaluation.py              # Cross-validation and metrics (F1, AUC-ROC, recall, FPR)
+│   ├── simulation.py              # Simulated email system for validation
+│   ├── api.py                     # Flask API for model serving
+│   ├── model_export.py            # Export trained models for API
+│   └── utils.py                   # Helper functions (e.g., data loading, logging)
+│
+├── extension/                     # Browser extension
+│   ├── manifest.json              # Extension configuration
+│   ├── popup.html                # Popup UI for email analysis
+│   ├── popup.js                  # JavaScript for popup logic
+│   ├── content.js                # Content script for email extraction
+│   ├── background.js             # Background script for API communication
+│   └── tailwind.css              # Tailwind CSS for styling
 │
 ├── notebooks/
-│   ├── EDA.ipynb           # Exploratory data analysis
-│   ├── SMOTE_Experiments.ipynb
-│   └── GAN_Experiments.ipynb
+│   ├── EDA.ipynb                 # Exploratory data analysis
+│   ├── Preprocessing.ipynb       # Data preprocessing experiments
+│   ├── SMOTE_Experiments.ipynb   # SMOTE baseline experiments
+│   ├── GAN_Experiments.ipynb     # SMOTified-GAN, MCMC-GAN, CGAN, VAE-GAN experiments
+│   ├── Classifier_Experiments.ipynb # Classifier comparison experiments
+│   └── Simulation.ipynb          # Simulated email system validation
 │
-├── requirements.txt        # Python dependencies
-├── README.md               # Project documentation
-└── .gitignore
+├── results/                      # Output results
+│   ├── metrics.csv               # Classification metrics (F1, recall, precision, AUC-ROC)
+│   ├── synthetic_samples/        # Generated synthetic email samples
+│   └── plots/                    # Visualization of results
+│
+├── requirements.txt              # Python dependencies
+├── README.md                     # Project documentation
+└── .gitignore                    # Git ignore file
