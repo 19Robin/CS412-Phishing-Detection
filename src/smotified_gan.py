@@ -1,59 +1,137 @@
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import TfidfVectorizer
-from smotified_gan_function import smotified_gan
-from mcmc_gan import mcmc_gan
-from evaluation import evaluate_model
-import matplotlib.pyplot as plt
+# src/smotified_gan.py
+import torch
+import torch.nn as nn
+import numpy as np
+from imblearn.over_sampling import SMOTE
+from scipy.sparse import issparse
+
+
+class Generator(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(Generator, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.Linear(512, output_dim),
+            nn.Tanh()
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class Discriminator(nn.Module):
+    def __init__(self, input_dim):
+        super(Discriminator, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+
+def gradient_penalty(discriminator, real_data, fake_data, device):
+    """Compute gradient penalty for WGAN-GP."""
+    batch_size = real_data.size(0)
+    alpha = torch.rand(batch_size, 1).to(device)
+    alpha = alpha.expand_as(real_data)
+    interpolates = alpha * real_data + (1 - alpha) * fake_data
+    interpolates.requires_grad_(True)
+    disc_interpolates = discriminator(interpolates)
+    gradients = torch.autograd.grad(
+        outputs=disc_interpolates, inputs=interpolates,
+        grad_outputs=torch.ones_like(disc_interpolates),
+        create_graph=True, retain_graph=True
+    )[0]
+    gradients = gradients.view(batch_size, -1)
+    gradient_norm = gradients.norm(2, dim=1)
+    return ((gradient_norm - 1) ** 2).mean()
+
+
+def smotified_gan(X, y, epochs=100, batch_size=32, noise_dim=100, gp_lambda=10):
+    """
+    SMOTified-GAN: Combines SMOTE with Wasserstein GAN for data augmentation.
+    Args:
+        X: Input features (sparse or dense)
+        y: Labels (0 or 1)
+        epochs: Number of training epochs
+        batch_size: Batch size
+        noise_dim: Dimension of noise input
+        gp_lambda: Gradient penalty coefficient
+    Returns:
+        Augmented features and labels
+    """
+    # Convert sparse to dense if necessary
+    if issparse(X):
+        X = X.toarray()
+
+    # Apply SMOTE
+    smote = SMOTE(k_neighbors=5, random_state=42)
+    X_smote, y_smote = smote.fit_resample(X, y)
+
+    # Initialize device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Initialize models
+    input_dim = X_smote.shape[1]
+    generator = Generator(noise_dim, input_dim).to(device)
+    discriminator = Discriminator(input_dim).to(device)
+
+    # Optimizers
+    g_optimizer = torch.optim.Adam(generator.parameters(), lr=0.0001, betas=(0.5, 0.9))
+    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(0.5, 0.9))
+
+    # Convert data to tensor
+    X_smote = torch.FloatTensor(X_smote).to(device)
+
+    # Training loop
+    for epoch in range(epochs):
+        for i in range(0, len(X_smote), batch_size):
+            # Train discriminator
+            real_data = X_smote[i:i + batch_size]
+            z = torch.randn(min(batch_size, len(X_smote) - i), noise_dim).to(device)
+            fake_data = generator(z)
+
+            d_real = discriminator(real_data)
+            d_fake = discriminator(fake_data.detach())
+
+            gp = gradient_penalty(discriminator, real_data, fake_data, device)
+            d_loss = d_fake.mean() - d_real.mean() + gp_lambda * gp
+
+            d_optimizer.zero_grad()
+            d_loss.backward()
+            d_optimizer.step()
+
+            # Train generator
+            fake_data = generator(z)
+            d_fake = discriminator(fake_data)
+            g_loss = -d_fake.mean()
+
+            g_optimizer.zero_grad()
+            g_loss.backward()
+            g_optimizer.step()
+
+        if epoch % 10 == 0:
+            print(f"Epoch {epoch}/{epochs}, D Loss: {d_loss.item():.4f}, G Loss: {g_loss.item():.4f}")
+
+    # Generate synthetic samples (same size as SMOTE output)
+    z = torch.randn(len(X_smote) - len(X), noise_dim).to(device)
+    X_fake = generator(z).detach().cpu().numpy()
+    y_fake = np.ones(len(X_fake))  # Phishing class
+
+    return np.vstack([X, X_fake]), np.hstack([y, y_fake])
+
 
 if __name__ == "__main__":
-    # Load dataset
-    dataset_path = "C:/Users/slade/Downloads/CS412/CS412-Phishing-Detection/data/Phishing_Email.csv"
-    data = pd.read_csv(dataset_path)
-
-    # Preprocess dataset
-    data = data.rename(columns={"Email Text": "email_text", "Email Type": "label"})
-    data["label"] = data["label"].map({"Phishing Email": 1, "Safe Email": 0})
-    data["email_text"] = data["email_text"].fillna("")  # Replace NaN with empty strings
-    X = data["email_text"].values
-    y = data["label"].values
-
-    # Split data
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # Vectorize text data
-    vectorizer = TfidfVectorizer(max_features=5000)
-    X_train_vectorized = vectorizer.fit_transform(X_train).toarray()
-    X_test_vectorized = vectorizer.transform(X_test).toarray()
-
-    # Evaluate without augmentation
-    print("Evaluating model without augmentation...")
-    precision_original, recall_original, auc_pr_original = evaluate_model(X_train_vectorized, y_train, X_test_vectorized, y_test)
-
-    # Run SMOTified-GAN
-    X_augmented, y_augmented = smotified_gan(X_train_vectorized, y_train, epochs=1000, batch_size=32)
-    print("SMOTified-GAN completed successfully!")
-    precision_smotified, recall_smotified, auc_pr_smotified = evaluate_model(X_augmented, y_augmented, X_test_vectorized, y_test)
-
-    # Run MCMC-GAN
-    X_augmented_mcmc, y_augmented_mcmc = mcmc_gan(X_train_vectorized, y_train, epochs=1000, batch_size=32)
-    print("MCMC-GAN completed successfully!")
-    precision_mcmc, recall_mcmc, auc_pr_mcmc = evaluate_model(X_augmented_mcmc, y_augmented_mcmc, X_test_vectorized, y_test)
-
-    # Plot Precision-Recall Curves
-    plt.figure(figsize=(10, 8))
-    plt.plot(recall_original, precision_original, label=f"Original (AUC = {auc_pr_original:.2f})", color="red")
-    plt.plot(recall_smotified, precision_smotified, label=f"SMOTified-GAN (AUC = {auc_pr_smotified:.2f})", color="blue")
-    plt.plot(recall_mcmc, precision_mcmc, label=f"MCMC-GAN (AUC = {auc_pr_mcmc:.2f})", color="green")
-    plt.xlabel("Recall")
-    plt.ylabel("Precision")
-    plt.title("Precision-Recall Curve Comparison")
-    plt.legend(loc="lower left")
-    plt.grid()
-    plt.show()
-
-    # Compare results
-    print("\n--- Comparison of Precision-Recall AUC Scores ---")
-    print(f"Original Data: {auc_pr_original:.2f}")
-    print(f"SMOTified-GAN: {auc_pr_smotified:.2f}")
-    print(f"MCMC-GAN: {auc_pr_mcmc:.2f}")
+    # Example usage
+    X = np.random.rand(100, 5000)  # Dummy data
+    y = np.array([0] * 90 + [1] * 10)  # Imbalanced
+    X_aug, y_aug = smotified_gan(X, y, epochs=10)
+    print("Augmented shape:", X_aug.shape)
