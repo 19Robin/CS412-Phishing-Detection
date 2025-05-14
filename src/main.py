@@ -1,5 +1,5 @@
-# src/main.py
 import numpy as np
+import pandas as pd
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from preprocessing import preprocess_email_data
@@ -11,11 +11,10 @@ from classifiers import train_random_forest, train_xgboost, train_lstm, predict_
 from evaluation import evaluate_model
 from imblearn.over_sampling import SMOTE
 
-
 def plot_precision_recall(metrics, labels, title="Precision-Recall Curve Comparison"):
     plt.figure(figsize=(10, 8))
-    for (precision, recall, _, auc_roc, _), label in zip(metrics, labels):
-        plt.plot(recall, precision, label=f"{label} (AUC-ROC = {auc_roc:.2f})")
+    for metric_dict, label in zip(metrics, labels):
+        plt.plot([0, 1], [metric_dict["precision"], metric_dict["precision"]], label=f"{label} (AUC-ROC = {metric_dict['auc_roc']:.2f})")  # Simplified for now
     plt.xlabel("Recall")
     plt.ylabel("Precision")
     plt.title(title)
@@ -24,11 +23,12 @@ def plot_precision_recall(metrics, labels, title="Precision-Recall Curve Compari
     plt.savefig("precision_recall.png")
     plt.show()
 
-
 if __name__ == "__main__":
     # Load and preprocess data
-    dataset_path = "../data/Phishing_Email.csv"
+    dataset_path = "C:/Users/slade/Downloads/CS412/Week 4/CS412-Phishing-Detection/data/Phishing_Email.csv"
     X, y, tfidf_text, tfidf_pos = preprocess_email_data(dataset_path)
+    print(f"Loaded dataset shape: {X.shape}")
+    print(f"Loaded label distribution: {pd.Series(y).value_counts()}")
 
     # Split data
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -45,9 +45,9 @@ if __name__ == "__main__":
 
     # Define classifiers
     classifiers = [
-        ("Random Forest", train_random_forest, 'sklearn'),
-        ("XGBoost", train_xgboost, 'sklearn'),
-        ("LSTM", train_lstm, 'pytorch')
+        ("Random Forest", train_random_forest, "rf"),
+        ("XGBoost", train_xgboost, "xgboost"),
+        ("LSTM", train_lstm, "lstm")
     ]
 
     # Evaluate each augmentation-classifier combination
@@ -58,21 +58,22 @@ if __name__ == "__main__":
             print(f"Evaluating {clf_name} with {aug_name}...")
             model = clf_fn(X_aug, y_aug)
             metrics = evaluate_model(model, X_aug, y_aug, X_test, y_test, clf_type)
-            print(f"{clf_name} - {aug_name}: Precision={metrics[0]:.2f}, Recall={metrics[1]:.2f}, "
-                  f"F1={metrics[2]:.2f}, AUC-ROC={metrics[3]:.2f}, FPR={metrics[4]:.2f}")
+            print(f"{clf_name} - {aug_name}: Precision={metrics['precision']:.2f}, Recall={metrics['recall']:.2f}, "
+                  f"F1={metrics['f1']:.2f}, AUC-ROC={metrics['auc_roc']:.2f}, FPR={metrics['fpr']:.2f}")
             aug_results.append(metrics)
         results.append((aug_name, aug_results))
 
     # Plot results for Random Forest (example)
-    rf_metrics = [(metrics[0], clf_name) for aug_name, metrics in results for clf_name, m, t in classifiers if
+    rf_metrics = [metrics[i] for aug_name, metrics in results for i, (clf_name, _, _) in enumerate(classifiers) if
                   clf_name == "Random Forest"]
-    metrics, labels = zip(
-        *[(m, aug_name) for aug_name, ms in results for clf_name, m, t in classifiers if clf_name == "Random Forest"])
-    plot_precision_recall(metrics, labels, "Random Forest Precision-Recall Curves")
+    labels = [aug_name for aug_name, metrics in results for i, (clf_name, _, _) in enumerate(classifiers) if
+              clf_name == "Random Forest"]
+    plot_precision_recall(rf_metrics, labels, "Random Forest Precision-Recall Curves")
 
     # Print summary
     print("\n--- Summary ---")
-    for aug_name, metrics in results:
-        for clf_name, m, _ in classifiers:
-            precision, recall, f1, auc_roc, fpr = m
-            print(f"{clf_name} - {aug_name}: AUC-ROC={auc_roc:.2f}, F1={f1:.2f}")
+    for aug_name, metrics_list in results:
+        for i, (clf_name, _, _) in enumerate(classifiers):
+            if i < len(metrics_list):
+                metrics = metrics_list[i]
+                print(f"{clf_name} - {aug_name}: AUC-ROC={metrics['auc_roc']:.2f}, F1={metrics['f1']:.2f}")
