@@ -27,8 +27,9 @@ def plot_precision_recall(metrics, labels, title="Precision-Recall Curve Compari
 if __name__ == "__main__":
     try:
         # Load and preprocess data (updated path for Colab or local)
-        dataset_path = "/content/drive/MyDrive/CS412-Phishing-Detection/data/Phishing_validation_emails.csv"  # For Colab
-        # For local: dataset_path = "C:/Users/slade/Downloads/CS412/Week 4/CS412-Phishing-Detection/data/Phishing_validation_emails.csv"
+        ##dataset_path = "/content/drive/MyDrive/CS412-Phishing-Detection/data/Phishing_validation_emails.csv"  # For Colab
+        ##dataset_path = "C:/Users/slade/Downloads/CS412/Week 4/CS412 - Phishing - Detection/data/Phishing_Email.csv"
+        dataset_path = "C:/Users/slade/Downloads/CS412/Week 4/CS412-Phishing-Detection/data/Phishing_Email.csv"
         X, y, tfidf_text, tfidf_pos = preprocess_email_data(dataset_path)
         print(f"Loaded dataset shape: {X.shape}")
         print(f"Loaded label distribution: {pd.Series(y).value_counts()}")
