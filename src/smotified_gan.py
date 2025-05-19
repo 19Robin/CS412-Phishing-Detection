@@ -1,4 +1,5 @@
 import pandas as pd
+
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from smotified_gan_function import smotified_gan
@@ -8,7 +9,7 @@ import matplotlib.pyplot as plt
 
 if __name__ == "__main__":
     # Load dataset
-    dataset_path = "C:/Users/slade/Downloads/CS412/CS412-Phishing-Detection/data/Phishing_Email.csv"
+    dataset_path = "C:/Users/skath/PycharmProjects/CS412-Phishing-Detection/data/Phishing_Email.csv"
     data = pd.read_csv(dataset_path)
 
     # Preprocess dataset
