@@ -48,14 +48,18 @@ def get_bert_embeddings(texts, max_length=128):
     return np.array(embeddings)
 
 def preprocess_email_data(dataset_path):
-    # Load dataset
-    df = pd.read_csv(dataset_path)
-    # Use correct column names
-    texts = df['Email Text'].astype(str).values  # Email text column
-    labels = (df['Email Type'] == 'Phishing Email').astype(int).values  # 0 (Safe Email), 1 (Phishing Email)
+    # Load dataset with low_memory=False and handle mixed types
+    df = pd.read_csv(dataset_path, low_memory=False)
+    # Convert all columns to string to avoid mixed types
+    df = df.astype(str)
+    # Use correct column names and filter valid labels
+    valid_labels = df['Email Type'].isin(['Phishing Email', 'Safe Email'])
+    df = df[valid_labels].copy()  # Use .copy() to avoid SettingWithCopyWarning
+    texts = df['Email Text'].values
+    labels = (df['Email Type'] == 'Phishing Email').astype(int).values
 
     # Handle missing or invalid text entries
-    texts = ["" if pd.isna(text) else text for text in texts]
+    texts = ["" if pd.isna(text) or not isinstance(text, str) else text for text in texts]
 
     # Preprocess text
     processed_texts = [preprocess_text(text) for text in texts]
@@ -88,5 +92,5 @@ def preprocess_email_data(dataset_path):
     return X, labels, tfidf_text, tfidf_pos
 
 if __name__ == "__main__":
-    dataset_path = "C:/Users/slade/Downloads/CS412/Week 4/CS412-Phishing-Detection/data/Phishing_Email.csv"
+    dataset_path = "/content/CS412-Phishing-Detection/data/Phishing_Emails.csv"
     X, y, tfidf_text, tfidf_pos = preprocess_email_data(dataset_path)
