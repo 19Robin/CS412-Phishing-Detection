@@ -1,96 +1,121 @@
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
-import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
-import spacy
+import nltk
 import re
 from transformers import BertTokenizer, BertModel
 import torch
+import joblib
 
 # Download NLTK data
 nltk.download('punkt')
 nltk.download('stopwords')
 nltk.download('wordnet')
 
-# Load SpaCy and BERT models globally
-nlp = spacy.load('en_core_web_sm')
-stop_words = set(stopwords.words('english'))
-lemmatizer = WordNetLemmatizer()
-bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-bert_model = BertModel.from_pretrained('bert-base-uncased').to('cuda')
 
-def count_urls(text):
-    url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
-    return len(url_pattern.findall(text))
-
-def preprocess_text(text):
-    # Tokenize
-    tokens = word_tokenize(text.lower())
-    # Remove stopwords and lemmatize
-    tokens = [lemmatizer.lemmatize(token) for token in tokens if token.isalnum() and token not in stop_words]
+def clean_text(text):
+    if not isinstance(text, str):
+        return ""
+    text = re.sub(r'http\S+', '', text)  # Remove URLs
+    text = re.sub(r'[^a-zA-Z\s]', '', text)  # Remove special characters
+    text = text.lower()  # Convert to lowercase
+    tokens = word_tokenize(text)
+    stop_words = set(stopwords.words('english'))
+    tokens = [token for token in tokens if token not in stop_words]
+    lemmatizer = WordNetLemmatizer()
+    tokens = [lemmatizer.lemmatize(token) for token in tokens]
     return ' '.join(tokens)
 
-def get_pos_tags(text):
-    doc = nlp(text, disable=["ner", "parser"])  # Disable unused components for speed
-    return ' '.join([token.pos_ for token in doc])
 
-def get_bert_embeddings(texts, max_length=128):
-    bert_model.eval()
+def get_bert_embeddings(texts, batch_size=16):
+    """Generate BERT embeddings for a list of texts."""
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    model = BertModel.from_pretrained('bert-base-uncased')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+    model.eval()
+
     embeddings = []
-    for text in texts:
-        inputs = bert_tokenizer(text, return_tensors='pt', max_length=max_length, truncation=True, padding=True).to('cuda')
+    for i in range(0, len(texts), batch_size):
+        batch_texts = texts[i:i + batch_size]
+        inputs = tokenizer(batch_texts, return_tensors='pt', padding=True, truncation=True, max_length=128)
+        inputs = {key: val.to(device) for key, val in inputs.items()}
         with torch.no_grad():
-            outputs = bert_model(**inputs)
-        embeddings.append(outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy())
-    return np.array(embeddings)
+            outputs = model(**inputs)
+        # Use [CLS] token embedding (first token) as the sentence representation
+        batch_embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+        embeddings.append(batch_embeddings)
+    return np.vstack(embeddings)
 
-def preprocess_email_data(dataset_path):
-    # Load dataset with low_memory=False and handle mixed types
-    df = pd.read_csv(dataset_path, low_memory=False)
-    # Convert all columns to string to avoid mixed types
-    df = df.astype(str)
-    # Use correct column names and filter valid labels
-    valid_labels = df['Email Type'].isin(['Phishing Email', 'Safe Email'])
-    df = df[valid_labels].copy()  # Use .copy() to avoid SettingWithCopyWarning
-    texts = df['Email Text'].values
-    labels = (df['Email Type'] == 'Phishing Email').astype(int).values
 
-    # Handle missing or invalid text entries
-    texts = ["" if pd.isna(text) or not isinstance(text, str) else text for text in texts]
-
-    # Preprocess text
-    processed_texts = [preprocess_text(text) for text in texts]
-    pos_tags = [get_pos_tags(text) for text in texts]
-    url_counts = [count_urls(text) for text in texts]
-
-    # TF-IDF features
-    tfidf_text = TfidfVectorizer(max_features=500)
-    tfidf_pos = TfidfVectorizer(max_features=100)
-    text_features = tfidf_text.fit_transform(processed_texts)
-    pos_features = tfidf_pos.fit_transform(pos_tags)
-
-    # BERT embeddings
-    bert_features = get_bert_embeddings(texts)
-
-    # Combine features
-    X = np.hstack([
-        text_features.toarray(),
-        pos_features.toarray(),
-        bert_features,
-        np.array(url_counts).reshape(-1, 1)
-    ])
-
-    # Debug prints
+def preprocess_email_data(file_path):
+    # Load dataset
+    df = pd.read_csv(file_path)
     print(f"Dataset shape before preprocessing: {df.shape}")
     print(f"Label distribution before preprocessing: {df['Email Type'].value_counts()}")
-    print(f"Feature shape after preprocessing: {X.shape}")
-    print(f"Label distribution after preprocessing: {pd.Series(labels).value_counts()}")
 
-    return X, labels, tfidf_text, tfidf_pos
+    # Map labels: Safe Email -> 0, Phishing Email -> 1
+    df['Label'] = df['Email Type'].map({'Safe Email': 0, 'Phishing Email': 1})
+    df = df.dropna(subset=['Label'])  # Drop rows with invalid labels
+    X_raw = df['Email Text'].fillna('').astype(str).tolist()
+    y = df['Label'].astype(int).values
+
+    # Clean text
+    X_cleaned = [clean_text(text) for text in X_raw]
+
+    # Generate BERT embeddings
+    X = get_bert_embeddings(X_cleaned)
+
+    # TF-IDF vectorizer for compatibility with RF/XGB models
+    tfidf_vectorizer = TfidfVectorizer(max_features=768)  # Match BERT dim for consistency
+    X_tfidf = tfidf_vectorizer.fit_transform(X_cleaned).toarray()
+
+    # Save the TF-IDF vectorizer for later use
+    os.makedirs('models', exist_ok=True)
+    joblib.dump(tfidf_vectorizer, 'models/tfidf_text.joblib')
+
+    print(f"BERT feature shape after preprocessing: {X.shape}")
+    print(f"TF-IDF feature shape after preprocessing: {X_tfidf.shape}")
+    print(f"Label distribution after preprocessing: {pd.Series(y).value_counts()}")
+    return X, y, X_tfidf, tfidf_vectorizer
+
+
+def preprocess_single_email(email_text, tfidf_vectorizer=None, bert_model=None, tokenizer=None):
+    """Preprocess a single email for classification."""
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # Clean the email text
+    cleaned_text = clean_text(email_text)
+
+    # BERT embeddings
+    if bert_model is None:
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        bert_model = BertModel.from_pretrained('bert-base-uncased').to(device)
+    bert_model.eval()
+    inputs = tokenizer(cleaned_text, return_tensors='pt', padding=True, truncation=True, max_length=128)
+    inputs = {key: val.to(device) for key, val in inputs.items()}
+    with torch.no_grad():
+        outputs = bert_model(**inputs)
+    bert_embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+
+    # TF-IDF features
+    if tfidf_vectorizer is None:
+        tfidf_vectorizer = joblib.load('models/tfidf_text.joblib')
+    tfidf_features = tfidf_vectorizer.transform([cleaned_text]).toarray()
+
+    return bert_embeddings, tfidf_features
+
 
 if __name__ == "__main__":
-    dataset_path = "/content/CS412-Phishing-Detection/data/Phishing_Emails.csv"
-    X, y, tfidf_text, tfidf_pos = preprocess_email_data(dataset_path)
+    # Test preprocessing
+    file_path = "/content/CS412-Phishing-Detection/data/Phishing_Emails.csv"
+    X, y, X_tfidf, tfidf_vectorizer = preprocess_email_data(file_path)
+
+    # Test single email preprocessing
+    sample_email = "This is a test email with a link http://example.com"
+    bert_emb, tfidf_emb = preprocess_single_email(sample_email)
+    print(f"Single email BERT embedding shape: {bert_emb.shape}")
+    print(f"Single email TF-IDF embedding shape: {tfidf_emb.shape}")
