@@ -180,35 +180,49 @@ def predict_all_models(bert_features, tfidf_features, email_text=""):
 
 @app.route('/classify', methods=['POST'])
 def classify():
-    data = request.json
-    email = data.get('email', '')
-    if not email:
-        logger.warning("No email provided in request.")
-        return jsonify({"error": "No email provided"}), 400
+    try:
+        # Fetch email snippet using Gmail API
+        email = fetch_email_snippet()
+        if not email or email == "No email found":
+            logger.warning("No email fetched from Gmail.")
+            return jsonify({"error": "No email fetched from Gmail"}), 400
 
-    logger.info(f"Classifying email: {email[:50]}...")
-    bert_features, tfidf_features = preprocess_single_email(email, tfidf_vectorizer, bert_model, bert_tokenizer, device)
-    if bert_features is None or tfidf_features is None:
-        logger.error("Email preprocessing failed.")
-        return jsonify({"error": "Email preprocessing failed"}), 400
+        logger.info(f"Classifying email: {email[:50]}...")
+        bert_features, tfidf_features = preprocess_single_email(email, tfidf_vectorizer, bert_model, bert_tokenizer, device)
+        if bert_features is None or tfidf_features is None:
+            logger.error("Email preprocessing failed.")
+            return jsonify({"error": "Email preprocessing failed"}), 400
 
-    preds = predict_all_models(bert_features, tfidf_features, email)
-    if not preds:
-        logger.error("Prediction failed.")
-        return jsonify({"error": "Prediction failed"}), 400
+        preds = predict_all_models(bert_features, tfidf_features, email)
+        if not preds:
+            logger.error("Prediction failed.")
+            return jsonify({"error": "Prediction failed"}), 400
 
-    # Average only LSTM predictions for now
-    lstm_preds = [v for k, v in preds.items() if "LSTM" in k]
-    avg_prob = np.mean(lstm_preds) if lstm_preds else 0.0
-    prediction = "Phishing" if avg_prob > 0.5 else "Safe"
-    logger.info(f"Consensus prediction: {prediction}, avg_prob: {avg_prob:.2f} (LSTM only)")
+        # Average only LSTM predictions for now
+        lstm_preds = [v for k, v in preds.items() if "LSTM" in k]
+        avg_prob = np.mean(lstm_preds) if lstm_preds else 0.0
+        prediction = "Phishing" if avg_prob > 0.5 else "Safe"
+        logger.info(f"Consensus prediction: {prediction}, avg_prob: {avg_prob:.2f} (LSTM only)")
 
-    accuracies = {k: f"{v * 100:.0f}%" for k, v in preds.items()}
+        accuracies = {k: f"{v * 100:.0f}%" for k, v in preds.items()}
 
-    return jsonify({
-        "prediction": prediction,
-        "accuracies": accuracies
-    })
+        return jsonify({
+            "email": email,
+            "prediction": prediction,
+            "accuracies": accuracies
+        })
+    except Exception as e:
+        logger.error(f"Classification failed: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/fetch-email', methods=['GET'])
+def fetch_email():
+    try:
+        email_snippet = fetch_email_snippet()
+        return jsonify({"email_snippet": email_snippet})
+    except Exception as e:
+        logger.error(f"Failed to fetch email: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     logger.info("Starting Flask server...")
