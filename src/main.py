@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from sklearn.model_selection import KFold
 from sklearn.metrics import auc
 from scipy import interpolate
@@ -19,33 +20,68 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
+import nltk
+
+# Download required NLTK data
+nltk.download('punkt', quiet=True)
+nltk.download('stopwords', quiet=True)
+nltk.download('wordnet', quiet=True)
+nltk.download('punkt_tab', quiet=True)
 
 def plot_precision_recall(metrics_data, labels, title, classifier_name):
-    # Extract AUC-PR and F1 scores
     auc_pr_data = {}
     f1_data = {}
     for (aug_name, clf_name, metrics), label in zip(metrics_data, labels):
         if clf_name == classifier_name:
-            key = label.split(' (')[0]  # Extract the base label (e.g., "Original")
-            auc_pr_data[key] = metrics[2]  # AUC-PR
-            f1_data[key] = metrics[3]      # F1
+            key = label.split(' (')[0]
+            auc_pr_data[key] = metrics[2]  # auc_pr
+            f1_data[key] = metrics[3]      # f1
 
-    # Bar chart configuration
+    # Matplotlib bar chart
+    labels = list(auc_pr_data.keys())
+    auc_pr_values = list(auc_pr_data.values())
+    f1_values = list(f1_data.values())
+
+    x = np.arange(len(labels))  # Label locations
+    width = 0.35  # Width of the bars
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.bar(x - width/2, auc_pr_values, width, label='AUC-PR Score', color='#36A2EB')
+    ax.bar(x + width/2, f1_values, width, label='F1 Score', color='#FF6384')
+
+    # Add labels, title, and legend
+    ax.set_ylabel('Score')
+    ax.set_title(title)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha='right')
+    ax.set_ylim(0, 1.0)
+    ax.legend()
+
+    # Save the chart to the outputs folder
+    output_dir = '/content/CS412-Phishing-Detection/outputs/'
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"{classifier_name}_performance_scores.png")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+    print(f"Bar chart for {classifier_name} saved to {output_path}")
+
+    # Original Chart.js config for canvas panel (optional)
     chart_config = {
         "type": "bar",
         "data": {
-            "labels": list(auc_pr_data.keys()),
+            "labels": labels,
             "datasets": [
                 {
                     "label": "AUC-PR Score",
-                    "data": list(auc_pr_data.values()),
+                    "data": auc_pr_values,
                     "backgroundColor": "#36A2EB",
                     "borderColor": "#FFFFFF",
                     "borderWidth": 1
                 },
                 {
                     "label": "F1 Score",
-                    "data": list(f1_data.values()),
+                    "data": f1_values,
                     "backgroundColor": "#FF6384",
                     "borderColor": "#FFFFFF",
                     "borderWidth": 1
@@ -121,7 +157,6 @@ def fetch_latest_email_snippet():
         return "No email found"
     except Exception as e:
         print(f"Error fetching email: {str(e)}")
-        # Mock email snippet for demo
         return "This is a mock email for demo purposes with a link http://example.com"
 
 def save_models(clf_type, model, aug_name, fold):
@@ -134,14 +169,15 @@ def save_models(clf_type, model, aug_name, fold):
         joblib.dump(model,
                     os.path.join(model_dir, f"{clf_type}_{aug_name.lower().replace('-', '_')}_fold{fold}.joblib"))
 
-def classify_email(email_text, rf_models, xgb_models, lstm_models):
+def classify_email(email_text, rf_models, xgb_models, lstm_models, tfidf_vectorizer):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    X = preprocess_single_email(email_text)
-    if X is None or X.size == 0:
+    # preprocess_single_email returns (bert_features, tfidf_features)
+    result = preprocess_single_email(email_text, tfidf_vectorizer=tfidf_vectorizer)
+    if result is None or len(result) == 0:
         return {}
-    bert_feature = X[:, :-1]
-    url_count = X[:, -1].reshape(1, -1)
-    X_processed = np.hstack([bert_feature, url_count])
+    bert_features, tfidf_features = result
+    # Combine BERT and TF-IDF features
+    X_processed = np.hstack([bert_features, tfidf_features])  # Shape: (1, 1536)
     preds = {}
     for aug in ["Original", "SMOTE", "SMOTified-GAN", "MCMC-GAN", "CGAN", "VAE-GAN"]:
         aug_lower = aug.lower().replace('-', '_')
@@ -149,7 +185,9 @@ def classify_email(email_text, rf_models, xgb_models, lstm_models):
         preds[f"XGBoost_{aug}"] = xgb_models[aug].predict_proba(X_processed)[0][1]
         lstm_model = lstm_models[aug]
         with torch.no_grad():
-            X_tensor = torch.FloatTensor(bert_feature).unsqueeze(1).to(device)
+            # LSTM expects shape (batch_size, sequence_length, feature_dim)
+            # Reshape X_processed to (1, 1, 1536)
+            X_tensor = torch.FloatTensor(X_processed).unsqueeze(1).to(device)
             y_prob = lstm_model(X_tensor).squeeze().cpu().numpy()
             preds[f"LSTM_{aug}"] = y_prob[0] if y_prob.ndim > 0 else y_prob.item()
     return preds
@@ -157,7 +195,10 @@ def classify_email(email_text, rf_models, xgb_models, lstm_models):
 if __name__ == "__main__":
     try:
         dataset_path = "/content/CS412-Phishing-Detection/data/Phishing_Emails.csv"
-        X, y = preprocess_email_data(dataset_path)
+        # Unpack the four values returned by preprocess_email_data
+        X_bert, y, X_tfidf, tfidf_vectorizer = preprocess_email_data(dataset_path)
+        # Combine BERT and TF-IDF features
+        X = np.hstack([X_bert, X_tfidf])  # Shape: (12295, 1536)
         print(f"Loaded dataset shape: {X.shape}")
         print(f"Loaded label distribution: {pd.Series(y).value_counts()}")
 
@@ -222,21 +263,21 @@ if __name__ == "__main__":
                                 xgb_models[aug_name] = model
                         save_models(clf_type, model, aug_name, fold + 1)
                         metrics = evaluate_model(model, X_aug, y_aug, X_test, y_test, clf_type)
+                        fold_metrics.append((aug_name, clf_name, (metrics["pr_curve"][0], metrics["pr_curve"][1], metrics["pr_curve"][2], metrics["f1"])))
                         print(
                             f"{clf_name} - {aug_name}: Precision={metrics['precision']:.2f}, Recall={metrics['recall']:.2f}, "
                             f"F1={metrics['f1']:.2f}, AUC-ROC={metrics['auc_roc']:.2f}, FPR={metrics['fpr']:.2f}")
-                        fold_metrics.append((aug_name, clf_name, (metrics["pr_curve"][0], metrics["pr_curve"][1], metrics["pr_curve"][2], metrics["f1"])))
                     except Exception as e:
                         print(f"Error evaluating {clf_name} with {aug_name} in fold {fold + 1}: {str(e)}")
 
             fold_results.extend(fold_metrics)
 
         results_dict = {}
-        for aug_name, clf_name, metrics in fold_results:
+        for aug_name, clf_name, (precision, recall, auc_pr, f1) in fold_results:
             key = (aug_name, clf_name)
             if key not in results_dict:
                 results_dict[key] = []
-            results_dict[key].append(metrics)
+            results_dict[key].append((precision, recall, auc_pr, f1))
 
         avg_results = []
         for (aug_name, clf_name), metrics_list in results_dict.items():
@@ -253,21 +294,21 @@ if __name__ == "__main__":
             print(f"Average for {clf_name} - {aug_name}: AUC-PR={avg_auc_pr:.2f}, F1={avg_f1:.2f}")
 
         for clf_name in ["Random Forest", "XGBoost", "LSTM"]:
-            clf_metrics = [metrics for aug_name, c_name, metrics in avg_results if c_name == clf_name]
+            clf_data = [(aug_name, c_name, metrics) for aug_name, c_name, metrics in avg_results if c_name == clf_name]
             labels = [f"{aug_name} (AUC-PR = {metrics[2]:.2f}, F1 = {metrics[3]:.2f})" for aug_name, c_name, metrics in avg_results if c_name == clf_name]
-            if clf_metrics:
-                chart = plot_precision_recall(clf_metrics, labels, f"{clf_name} Performance Scores", clf_name)
+            if clf_data:
+                chart = plot_precision_recall(clf_data, labels, f"{clf_name} Performance Scores", clf_name)
                 print(f"Bar chart for {clf_name} generated. Visualize in canvas panel:")
                 print(chart)
 
         print("\n--- Summary ---")
-        for aug_name, clf_name, metrics in avg_results:
-            print(f"{clf_name} - {aug_name}: AUC-PR={metrics[2]:.2f}, F1={metrics[3]:.2f}")
+        for aug_name, clf_name, (precision, recall, auc_pr, f1) in avg_results:
+            print(f"{clf_name} - {aug_name}: AUC-PR={auc_pr:.2f}, F1={f1:.2f}")
 
         # Classify latest email
         email_text = fetch_latest_email_snippet()
         print(f"Classifying email: {email_text[:50]}...")
-        preds = classify_email(email_text, rf_models, xgb_models, lstm_models)
+        preds = classify_email(email_text, rf_models, xgb_models, lstm_models, tfidf_vectorizer)
         avg_prob = np.mean(list(preds.values()))
         prediction = "Phishing" if avg_prob > 0.5 else "Safe"
         accuracies = {k: f"{v * 100:.0f}%" for k, v in preds.items()}

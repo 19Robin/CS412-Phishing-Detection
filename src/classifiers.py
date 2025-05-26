@@ -66,18 +66,15 @@ def train_lstm(X, y, batch_size=32, epochs=10, hidden_dim=128):
         raise ValueError("Empty dataset provided for training LSTM")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-    # Remove URL count feature for LSTM input (last column)
-    X_train_lstm = X_train[:, :-1]
-    X_test_lstm = X_test[:, :-1]
-    input_size = X_train_lstm.shape[1]  # Should be 768 (BERT features)
+    input_size = X_train.shape[1]  # Should be 1535 (BERT + TF-IDF, after URL count removed in main.py)
     model = LSTMClassifier(input_size, hidden_dim, 1).to(device)
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     for epoch in range(epochs):
         model.train()
-        for i in range(0, len(X_train_lstm), batch_size):
-            batch_X = X_train_lstm[i:i + batch_size]
+        for i in range(0, len(X_train), batch_size):
+            batch_X = X_train[i:i + batch_size]
             batch_y = y_train[i:i + batch_size]
             batch_X = torch.FloatTensor(batch_X).unsqueeze(1).to(device)
             batch_y = torch.FloatTensor(batch_y).reshape(-1, 1).to(device)
@@ -90,7 +87,7 @@ def train_lstm(X, y, batch_size=32, epochs=10, hidden_dim=128):
 
     model.eval()
     with torch.no_grad():
-        X_test_tensor = torch.FloatTensor(X_test_lstm).unsqueeze(1).to(device)
+        X_test_tensor = torch.FloatTensor(X_test).unsqueeze(1).to(device)
         y_prob = model(X_test_tensor).squeeze().cpu().numpy()
         y_pred = (y_prob > 0.5).astype(int)
     f1 = f1_score(y_test, y_pred, zero_division=0)
@@ -103,9 +100,7 @@ def train_lstm(X, y, batch_size=32, epochs=10, hidden_dim=128):
 def predict_lstm(model, X, device='cuda' if torch.cuda.is_available() else 'cpu'):
     model.eval()
     model.to(device)
-    # Remove URL count feature for LSTM input
-    X_lstm = X[:, :-1] if X.shape[1] > 768 else X
-    X_tensor = torch.FloatTensor(X_lstm).unsqueeze(1).to(device)
+    X_tensor = torch.FloatTensor(X).unsqueeze(1).to(device)
     with torch.no_grad():
         outputs = model(X_tensor).squeeze().cpu().numpy()
     y_pred = (outputs > 0.5).astype(int)
