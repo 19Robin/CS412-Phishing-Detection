@@ -9,12 +9,12 @@ import re
 from transformers import BertTokenizer, BertModel
 import torch
 import joblib
+import os
 
 # Download NLTK data
 nltk.download('punkt')
 nltk.download('stopwords')
 nltk.download('wordnet')
-
 
 def clean_text(text):
     if not isinstance(text, str):
@@ -29,14 +29,17 @@ def clean_text(text):
     tokens = [lemmatizer.lemmatize(token) for token in tokens]
     return ' '.join(tokens)
 
-
-def get_bert_embeddings(texts, batch_size=16):
+def get_bert_embeddings(texts, batch_size=16, model=None, tokenizer=None, device=None):
     """Generate BERT embeddings for a list of texts."""
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    model = BertModel.from_pretrained('bert-base-uncased')
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model.to(device)
-    model.eval()
+    if model is None or tokenizer is None or device is None:
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        model = BertModel.from_pretrained('bert-base-uncased')
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model.to(device)
+        model.eval()
+    else:
+        model.to(device)
+        model.eval()
 
     embeddings = []
     for i in range(0, len(texts), batch_size):
@@ -45,11 +48,9 @@ def get_bert_embeddings(texts, batch_size=16):
         inputs = {key: val.to(device) for key, val in inputs.items()}
         with torch.no_grad():
             outputs = model(**inputs)
-        # Use [CLS] token embedding (first token) as the sentence representation
         batch_embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()
         embeddings.append(batch_embeddings)
     return np.vstack(embeddings)
-
 
 def preprocess_email_data(file_path):
     # Load dataset
@@ -67,7 +68,7 @@ def preprocess_email_data(file_path):
     X_cleaned = [clean_text(text) for text in X_raw]
 
     # Generate BERT embeddings
-    X = get_bert_embeddings(X_cleaned)
+    X_bert = get_bert_embeddings(X_cleaned)
 
     # TF-IDF vectorizer for compatibility with RF/XGB models
     tfidf_vectorizer = TfidfVectorizer(max_features=768)  # Match BERT dim for consistency
@@ -77,23 +78,22 @@ def preprocess_email_data(file_path):
     os.makedirs('models', exist_ok=True)
     joblib.dump(tfidf_vectorizer, 'models/tfidf_text.joblib')
 
-    print(f"BERT feature shape after preprocessing: {X.shape}")
+    print(f"BERT feature shape after preprocessing: {X_bert.shape}")
     print(f"TF-IDF feature shape after preprocessing: {X_tfidf.shape}")
     print(f"Label distribution after preprocessing: {pd.Series(y).value_counts()}")
-    return X, y, X_tfidf, tfidf_vectorizer
+    return X_bert, y, X_tfidf, tfidf_vectorizer
 
-
-def preprocess_single_email(email_text, tfidf_vectorizer=None, bert_model=None, tokenizer=None):
+def preprocess_single_email(email_text, tfidf_vectorizer=None, bert_model=None, tokenizer=None, device=None):
     """Preprocess a single email for classification."""
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
     # Clean the email text
     cleaned_text = clean_text(email_text)
 
     # BERT embeddings
-    if bert_model is None:
+    if bert_model is None or tokenizer is None or device is None:
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        bert_model = BertModel.from_pretrained('bert-base-uncased').to(device)
+        bert_model = BertModel.from_pretrained('bert-base-uncased')
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        bert_model.to(device)
     bert_model.eval()
     inputs = tokenizer(cleaned_text, return_tensors='pt', padding=True, truncation=True, max_length=128)
     inputs = {key: val.to(device) for key, val in inputs.items()}
@@ -103,15 +103,14 @@ def preprocess_single_email(email_text, tfidf_vectorizer=None, bert_model=None, 
 
     # TF-IDF features
     if tfidf_vectorizer is None:
-        tfidf_vectorizer = joblib.load('models/tfidf_text.joblib')
+        tfidf_vectorizer = joblib.load(os.path.join('models', 'tfidf_text.joblib'))
     tfidf_features = tfidf_vectorizer.transform([cleaned_text]).toarray()
 
     return bert_embeddings, tfidf_features
 
-
 if __name__ == "__main__":
     # Test preprocessing
-    file_path = "/content/CS412-Phishing-Detection/data/Phishing_Emails.csv"
+    file_path = "C:/Users/slade/Downloads/CS412/Project/data/Phishing_Emails.csv"
     X, y, X_tfidf, tfidf_vectorizer = preprocess_email_data(file_path)
 
     # Test single email preprocessing

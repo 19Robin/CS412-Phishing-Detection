@@ -1,53 +1,30 @@
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "classifyEmail") {
-        chrome.runtime.sendMessage({ action: "getEmail" }, (emailResponse) => {
-            if (emailResponse && emailResponse.email) {
-                fetch('http://localhost:5000/classify', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: emailResponse.email })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.prediction) {
-                        sendResponse({ action: "classifyResult", prediction: data.prediction, accuracies: data.accuracies });
-                    } else {
-                        sendResponse({ action: "classifyResult", error: data.error || "Classification failed" });
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    sendResponse({ action: "classifyResult", error: "Server connection failed" });
-                });
+        // Hardcode email for testing (revert to original logic after this test)
+        const testEmail = "Click http://phishing.link to win $1000!";
+        fetch('http://localhost:5000/classify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: testEmail }),
+            signal: AbortSignal.timeout(5000) // 5-second timeout
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.prediction) {
+                sendResponse({ action: "classifyResult", prediction: data.prediction, accuracies: data.accuracies });
             } else {
-                sendResponse({ action: "classifyResult", error: "Email fetch failed" });
+                sendResponse({ action: "classifyResult", error: data.error || "Classification failed" });
             }
+        })
+        .catch(error => {
+            console.error('Fetch error:', error);
+            sendResponse({ action: "classifyResult", error: "Server connection failed: " + error.message });
         });
-        return true;
-    }
-    if (message.action === "getEmail") {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (!tabs[0]) {
-                sendResponse({ email: null });
-                return;
-            }
-            chrome.scripting.executeScript({
-                target: { tabId: tabs[0].id },
-                files: ['content.js']
-            }, () => {
-                if (chrome.runtime.lastError) {
-                    sendResponse({ email: null });
-                    return;
-                }
-                chrome.tabs.sendMessage(tabs[0].id, { action: "extractEmail" }, (response) => {
-                    if (chrome.runtime.lastError || !response) {
-                        sendResponse({ email: null });
-                    } else {
-                        sendResponse({ email: response.email });
-                    }
-                });
-            });
-        });
-        return true;
+        return true; // Keep message channel open for async response
     }
 });
