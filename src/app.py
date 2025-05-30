@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
@@ -178,51 +179,71 @@ def predict_all_models(bert_features, tfidf_features, email_text=""):
 
     return preds
 
+SAFE_DOMAINS = {"bsplife.com.fj", "digicel.com", "google.com"}
+
 @app.route('/classify', methods=['POST'])
 def classify():
-    try:
-        # Fetch email snippet using Gmail API
-        email = fetch_email_snippet()
-        if not email or email == "No email found":
-            logger.warning("No email fetched from Gmail.")
-            return jsonify({"error": "No email fetched from Gmail"}), 400
+    data = request.json
+    email = data.get('email', '')
+    if not email:
+        logger.warning("No email provided in request.")
+        return jsonify({"error": "No email provided"}), 400
 
-        logger.info(f"Classifying email: {email[:50]}...")
-        bert_features, tfidf_features = preprocess_single_email(email, tfidf_vectorizer, bert_model, bert_tokenizer, device)
-        if bert_features is None or tfidf_features is None:
-            logger.error("Email preprocessing failed.")
-            return jsonify({"error": "Email preprocessing failed"}), 400
+    logger.info(f"Classifying email: {email[:50]}...")
+    logger.debug(f"Raw email content: {email}")
 
-        preds = predict_all_models(bert_features, tfidf_features, email)
-        if not preds:
-            logger.error("Prediction failed.")
-            return jsonify({"error": "Prediction failed"}), 400
+    # Enhanced URL detection
+    url_match = re.search(r'http[s]?://[^\s]+|www\.[^\s]+|[^\s]+\.(com|org|net|fj)', email)
+    suspicious_url = False
+    url_penalty = 0.0
+    if url_match:
+        url = url_match.group(0).lower()
+        if not any(domain in url for domain in SAFE_DOMAINS):
+            suspicious_url = True
+            url_penalty = 0.2  # Penalty for suspicious URLs
+        else:
+            url_penalty = -0.1  # Negative penalty for safe URLs
+    logger.debug(f"Suspicious URL detected: {suspicious_url}, penalty: {url_penalty}, URL: {url_match.group(0) if url_match else None}")
 
-        # Average only LSTM predictions for now
-        lstm_preds = [v for k, v in preds.items() if "LSTM" in k]
-        avg_prob = np.mean(lstm_preds) if lstm_preds else 0.0
-        prediction = "Phishing" if avg_prob > 0.5 else "Safe"
-        logger.info(f"Consensus prediction: {prediction}, avg_prob: {avg_prob:.2f} (LSTM only)")
+    bert_features, tfidf_features = preprocess_single_email(email, tfidf_vectorizer, bert_model, bert_tokenizer, device)
+    if bert_features is None or tfidf_features is None:
+        logger.error("Email preprocessing failed.")
+        return jsonify({"error": "Email preprocessing failed"}), 400
 
-        accuracies = {k: f"{v * 100:.0f}%" for k, v in preds.items()}
+    logger.debug(f"BERT features sample: {bert_features.flatten()[:5]}")
+    logger.debug(f"TF-IDF features sample: {tfidf_features.flatten()[:5]}")
 
-        return jsonify({
-            "email": email,
-            "prediction": prediction,
-            "accuracies": accuracies
-        })
-    except Exception as e:
-        logger.error(f"Classification failed: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+    preds = predict_all_models(bert_features, tfidf_features, email)
+    if not preds:
+        logger.error("Prediction failed.")
+        return jsonify({"error": "Prediction failed"}), 400
 
-@app.route('/fetch-email', methods=['GET'])
-def fetch_email():
-    try:
-        email_snippet = fetch_email_snippet()
-        return jsonify({"email_snippet": email_snippet})
-    except Exception as e:
-        logger.error(f"Failed to fetch email: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+    # Adjusted weights for balance
+    weights = {
+        "RandomForest_Original": 1.0, "XGBoost_Original": 1.0,  # Increased for balance
+        "RandomForest_SMOTE": 1.0, "XGBoost_SMOTE": 1.0,
+        "RandomForest_SMOTified-GAN": 1.5, "XGBoost_SMOTified-GAN": 1.5,
+        "RandomForest_MCMC-GAN": 1.0, "XGBoost_MCMC-GAN": 1.0,
+        "RandomForest_CGAN": 1.0, "XGBoost_CGAN": 1.5,
+        "RandomForest_VAE-GAN": 1.5, "XGBoost_VAE-GAN": 2.0  # Reduced from 3.0
+    }
+    weighted_preds = [preds[model] * weights[model] for model in weights]
+    total_weight = sum(weights.values())
+    avg_prob = sum(weighted_preds) / total_weight if total_weight > 0 else 0.0
+    avg_prob += url_penalty  # Apply URL penalty or safe URL bonus
+
+    # Raise threshold to 0.60
+    prediction = "Phishing" if avg_prob > 0.60 else "Safe"
+    logger.info(f"Consensus prediction: {prediction}, avg_prob: {avg_prob:.2f} (weighted average, excluding LSTM)")
+
+    accuracies = {k: f"{v * 100:.0f}%" for k, v in preds.items()}
+    logger.debug(f"Model predictions: {accuracies}")
+
+    return jsonify({
+        "prediction": prediction,
+        "avg_prob": avg_prob,
+        "accuracies": accuracies
+    })
 
 if __name__ == "__main__":
     logger.info("Starting Flask server...")

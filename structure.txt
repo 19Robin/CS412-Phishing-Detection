@@ -35,13 +35,8 @@ CS412-Phishing-Detection/
 │   └── tailwind.css              # Tailwind CSS for styling
 │
 ├── notebooks/
-│   ├── EDA.ipynb                 # Exploratory data analysis
-│   ├── Preprocessing.ipynb       # Data preprocessing experiments
-│   ├── SMOTE_Experiments.ipynb   # SMOTE baseline experiments
-│   ├── GAN_Experiments.ipynb     # SMOTified-GAN, MCMC-GAN, CGAN, VAE-GAN experiments
-│   ├── Classifier_Experiments.ipynb # Classifier comparison experiments
-│   └── Simulation.ipynb          # Simulated email system validation
-│
+│   └── CS412.ipynb                 # Exploratory data analysis
+
 ├── results/                      # Output results
 │   ├── metrics.csv               # Classification metrics (F1, recall, precision, AUC-ROC)
 │   ├── synthetic_samples/        # Generated synthetic email samples

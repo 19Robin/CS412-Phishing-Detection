@@ -9,10 +9,15 @@
     "webRequest",
     "tabs"
   ],
+  "host_permissions": [
+    "http://localhost:5000/*",
+    "https://mail.google.com/*"
+  ],
   "content_scripts": [
     {
       "matches": ["https://mail.google.com/*"],
-      "js": ["content.js"]
+      "js": ["content.js"],
+      "run_at": "document_idle"
     }
   ],
   "action": {
@@ -31,5 +36,8 @@
       "resources": ["content.js", "popup.html", "icon16.png", "icon48.png", "icon128.png"],
       "matches": ["https://mail.google.com/*"]
     }
-  ]
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src http://localhost:5000"
+  }
 }

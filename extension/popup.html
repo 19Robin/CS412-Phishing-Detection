@@ -1,23 +1,19 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Phishing Detector</title>
-  <link rel="stylesheet" href="popup.css">
+    <title>Phishing Detector</title>
+    <link rel="stylesheet" href="popup.css">
+    <style>
+        /* Inline styles for dynamic elements if needed */
+    </style>
 </head>
 <body>
-  <div id="draggable-popup">
-    <div id="popup-header">CS412 Email Phishing Detector</div>
+    <h1>CS412 Phishing Detector</h1>
     <button id="classify-btn">Classify Email</button>
-
-    <div id="result">Waiting...</div>
-
+    <div id="result"></div>
     <div id="model-status" class="hidden">
-      <div class="model-row"><span>LSTM</span><div class="loader"></div></div>
-      <div class="model-row"><span>XGBoost</span><div class="loader"></div></div>
-      <div class="model-row"><span>RandomForest</span><div class="loader"></div></div>
+        <!-- Model status rows can be dynamically added by JS -->
     </div>
-  </div>
-  <script src="popup.js"></script>
+    <script src="popup.js"></script>
 </body>
 </html>
